@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"os"
+	"sync"
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/adapter/inbound"
@@ -40,14 +41,16 @@ type Inbound struct {
 	fallbackAddr             M.Socksaddr
 	fallbackAddrTLSNextProto map[string]M.Socksaddr
 	transport                adapter.V2RayServerTransport
+	userconns                sync.Map
 }
 
 func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.TrojanInboundOptions) (adapter.Inbound, error) {
 	inbound := &Inbound{
-		Adapter: inbound.NewAdapter(C.TypeTrojan, tag),
-		router:  router,
-		logger:  logger,
-		users:   options.Users,
+		Adapter:   inbound.NewAdapter(C.TypeTrojan, tag),
+		router:    router,
+		logger:    logger,
+		users:     options.Users,
+		userconns: sync.Map{},
 	}
 	if options.TLS != nil {
 		tlsConfig, err := tls.NewServerWithOptions(tls.ServerOptions{
@@ -195,6 +198,7 @@ func (h *Inbound) newConnection(ctx context.Context, conn net.Conn, metadata ada
 	} else {
 		metadata.User = user
 	}
+	h.userconns.Store(conn, metadata.User)
 	h.logger.InfoContext(ctx, "[", user, "] inbound connection to ", metadata.Destination)
 	h.router.RouteConnectionEx(ctx, conn, metadata, onClose)
 }
@@ -213,6 +217,7 @@ func (h *Inbound) newPacketConnection(ctx context.Context, conn N.PacketConn, me
 	} else {
 		metadata.User = user
 	}
+	h.userconns.Store(conn, metadata.User)
 	h.logger.InfoContext(ctx, "[", user, "] inbound packet connection to ", metadata.Destination)
 	h.router.RoutePacketConnectionEx(ctx, conn, metadata, onClose)
 }

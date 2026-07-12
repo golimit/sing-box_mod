@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -36,6 +37,9 @@ type Inbound struct {
 	tlsConfig    tls.ServerConfig
 	service      *hysteria2.Service[int]
 	userNameList []string
+	uidToUuid    map[int]string
+	uuidToUid    map[string]int
+	userconns    sync.Map
 }
 
 func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.Hysteria2InboundOptions) (adapter.Inbound, error) {
@@ -97,15 +101,18 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 		}
 	}
 	inbound := &Inbound{
-		Adapter: inbound.NewAdapter(C.TypeHysteria2, tag),
-		router:  router,
-		logger:  logger,
+		Adapter:   inbound.NewAdapter(C.TypeHysteria2, tag),
+		router:    router,
+		logger:    logger,
 		listener: listener.New(listener.Options{
 			Context: ctx,
 			Logger:  logger,
 			Listen:  options.ListenOptions,
 		}),
 		tlsConfig: tlsConfig,
+		uidToUuid: make(map[int]string),
+		uuidToUid: make(map[string]int),
+		userconns: sync.Map{},
 	}
 	var udpTimeout time.Duration
 	if options.UDPTimeout != 0 {
@@ -136,6 +143,8 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 		userList = append(userList, index)
 		userNameList = append(userNameList, user.Name)
 		userPasswordList = append(userPasswordList, user.Password)
+		inbound.uuidToUid[user.Password] = index
+		inbound.uidToUuid[index] = user.Password
 	}
 	service.UpdateUsers(userList, userPasswordList)
 	inbound.service = service
@@ -158,6 +167,7 @@ func (h *Inbound) NewConnectionEx(ctx context.Context, conn net.Conn, source M.S
 	userID, _ := auth.UserFromContext[int](ctx)
 	if userName := h.userNameList[userID]; userName != "" {
 		metadata.User = userName
+		h.userconns.Store(conn, userName)
 		h.logger.InfoContext(ctx, "[", userName, "] inbound connection to ", metadata.Destination)
 	} else {
 		h.logger.InfoContext(ctx, "inbound connection to ", metadata.Destination)
@@ -180,6 +190,7 @@ func (h *Inbound) NewPacketConnectionEx(ctx context.Context, conn N.PacketConn, 
 	userID, _ := auth.UserFromContext[int](ctx)
 	if userName := h.userNameList[userID]; userName != "" {
 		metadata.User = userName
+		h.userconns.Store(conn, userName)
 		h.logger.InfoContext(ctx, "[", userName, "] inbound packet connection to ", metadata.Destination)
 	} else {
 		h.logger.InfoContext(ctx, "inbound packet connection to ", metadata.Destination)

@@ -3,6 +3,7 @@ package tuic
 import (
 	"context"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -35,6 +36,9 @@ type Inbound struct {
 	tlsConfig    tls.ServerConfig
 	server       *tuic.Service[int]
 	userNameList []string
+	uidToUuid    map[int]string
+	uuidToUid    map[string]int
+	userconns    sync.Map
 }
 
 func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.TUICInboundOptions) (adapter.Inbound, error) {
@@ -47,15 +51,18 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 		return nil, err
 	}
 	inbound := &Inbound{
-		Adapter: inbound.NewAdapter(C.TypeTUIC, tag),
-		router:  uot.NewRouter(router, logger),
-		logger:  logger,
+		Adapter:   inbound.NewAdapter(C.TypeTUIC, tag),
+		router:    uot.NewRouter(router, logger),
+		logger:    logger,
 		listener: listener.New(listener.Options{
 			Context: ctx,
 			Logger:  logger,
 			Listen:  options.ListenOptions,
 		}),
 		tlsConfig: tlsConfig,
+		uidToUuid: make(map[int]string),
+		uuidToUid: make(map[string]int),
+		userconns: sync.Map{},
 	}
 	var udpTimeout time.Duration
 	if options.UDPTimeout != 0 {
@@ -93,6 +100,8 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 		userNameList = append(userNameList, user.Name)
 		userUUIDList = append(userUUIDList, userUUID)
 		userPasswordList = append(userPasswordList, user.Password)
+		inbound.uuidToUid[user.UUID] = index
+		inbound.uidToUuid[index] = user.UUID
 	}
 	service.UpdateUsers(userList, userUUIDList, userPasswordList)
 	inbound.server = service
@@ -115,6 +124,7 @@ func (h *Inbound) NewConnectionEx(ctx context.Context, conn net.Conn, source M.S
 	userID, _ := auth.UserFromContext[int](ctx)
 	if userName := h.userNameList[userID]; userName != "" {
 		metadata.User = userName
+		h.userconns.Store(conn, userName)
 		h.logger.InfoContext(ctx, "[", userName, "] inbound connection to ", metadata.Destination)
 	} else {
 		h.logger.InfoContext(ctx, "inbound connection to ", metadata.Destination)
@@ -137,6 +147,7 @@ func (h *Inbound) NewPacketConnectionEx(ctx context.Context, conn N.PacketConn, 
 	userID, _ := auth.UserFromContext[int](ctx)
 	if userName := h.userNameList[userID]; userName != "" {
 		metadata.User = userName
+		h.userconns.Store(conn, userName)
 		h.logger.InfoContext(ctx, "[", userName, "] inbound packet connection to ", metadata.Destination)
 	} else {
 		h.logger.InfoContext(ctx, "inbound packet connection to ", metadata.Destination)
