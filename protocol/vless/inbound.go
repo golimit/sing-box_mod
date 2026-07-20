@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -155,7 +156,9 @@ func (h *Inbound) NewConnectionEx(ctx context.Context, conn net.Conn, metadata a
 		tlsConn, err := tls.ServerHandshake(ctx, conn, h.tlsConfig)
 		if err != nil {
 			N.CloseOnHandshakeFailure(conn, onClose, err)
-			h.logger.ErrorContext(ctx, E.Cause(err, "process connection from ", metadata.Source, ": TLS handshake"))
+			if !strings.Contains(err.Error(), "processed invalid connection") {
+				h.logger.ErrorContext(ctx, E.Cause(err, "process connection from ", metadata.Source, ": TLS handshake"))
+			}
 			return
 		}
 		conn = tlsConn
@@ -203,11 +206,7 @@ func (h *Inbound) newPacketConnectionEx(ctx context.Context, conn N.PacketConn, 
 	} else {
 		metadata.User = user
 	}
-	trackedConn := conn
-	h.userconns.Store(trackedConn, metadata.User)
-	onClose = N.AppendClose(onClose, func(it error) {
-		h.userconns.Delete(trackedConn)
-	})
+	// PacketConn is not net.Conn; do not store in userconns (DelUsers asserts net.Conn).
 	if metadata.Destination.Fqdn == packetaddr.SeqPacketMagicAddress {
 		metadata.Destination = M.Socksaddr{}
 		conn = packetaddr.NewConn(bufio.NewNetPacketConn(conn), metadata.Destination)

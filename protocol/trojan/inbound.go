@@ -220,10 +220,7 @@ func (h *Inbound) newPacketConnection(ctx context.Context, conn N.PacketConn, me
 	} else {
 		metadata.User = user
 	}
-	h.userconns.Store(conn, metadata.User)
-	onClose = N.AppendClose(onClose, func(it error) {
-		h.userconns.Delete(conn)
-	})
+	// PacketConn is not net.Conn; do not store in userconns (DelUsers asserts net.Conn).
 	h.logger.InfoContext(ctx, "[", user, "] inbound packet connection to ", metadata.Destination)
 	h.router.RoutePacketConnectionEx(ctx, conn, metadata, onClose)
 }
