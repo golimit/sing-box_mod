@@ -135,6 +135,9 @@ func (h *inboundHandler) NewConnectionEx(ctx context.Context, conn net.Conn, sou
 	if userName, _ := auth.UserFromContext[string](ctx); userName != "" {
 		metadata.User = userName
 		h.userconns.Store(conn, userName)
+		onClose = N.AppendClose(onClose, func(it error) {
+			h.userconns.Delete(conn)
+		})
 		h.logger.InfoContext(ctx, "[", userName, "] inbound connection to ", metadata.Destination)
 	} else {
 		h.logger.InfoContext(ctx, "inbound connection to ", metadata.Destination)

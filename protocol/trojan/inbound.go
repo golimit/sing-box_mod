@@ -199,6 +199,9 @@ func (h *Inbound) newConnection(ctx context.Context, conn net.Conn, metadata ada
 		metadata.User = user
 	}
 	h.userconns.Store(conn, metadata.User)
+	onClose = N.AppendClose(onClose, func(it error) {
+		h.userconns.Delete(conn)
+	})
 	h.logger.InfoContext(ctx, "[", user, "] inbound connection to ", metadata.Destination)
 	h.router.RouteConnectionEx(ctx, conn, metadata, onClose)
 }
@@ -218,6 +221,9 @@ func (h *Inbound) newPacketConnection(ctx context.Context, conn N.PacketConn, me
 		metadata.User = user
 	}
 	h.userconns.Store(conn, metadata.User)
+	onClose = N.AppendClose(onClose, func(it error) {
+		h.userconns.Delete(conn)
+	})
 	h.logger.InfoContext(ctx, "[", user, "] inbound packet connection to ", metadata.Destination)
 	h.router.RoutePacketConnectionEx(ctx, conn, metadata, onClose)
 }

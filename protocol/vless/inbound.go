@@ -182,6 +182,9 @@ func (h *Inbound) newConnectionEx(ctx context.Context, conn net.Conn, metadata a
 		metadata.User = user
 	}
 	h.userconns.Store(conn, metadata.User)
+	onClose = N.AppendClose(onClose, func(it error) {
+		h.userconns.Delete(conn)
+	})
 	h.logger.InfoContext(ctx, "[", user, "] inbound connection to ", metadata.Destination)
 	h.router.RouteConnectionEx(ctx, conn, metadata, onClose)
 }
@@ -200,7 +203,11 @@ func (h *Inbound) newPacketConnectionEx(ctx context.Context, conn N.PacketConn, 
 	} else {
 		metadata.User = user
 	}
-	h.userconns.Store(conn, metadata.User)
+	trackedConn := conn
+	h.userconns.Store(trackedConn, metadata.User)
+	onClose = N.AppendClose(onClose, func(it error) {
+		h.userconns.Delete(trackedConn)
+	})
 	if metadata.Destination.Fqdn == packetaddr.SeqPacketMagicAddress {
 		metadata.Destination = M.Socksaddr{}
 		conn = packetaddr.NewConn(bufio.NewNetPacketConn(conn), metadata.Destination)

@@ -125,6 +125,9 @@ func (h *Inbound) NewConnectionEx(ctx context.Context, conn net.Conn, source M.S
 	if userName := h.userNameList[userID]; userName != "" {
 		metadata.User = userName
 		h.userconns.Store(conn, userName)
+		onClose = N.AppendClose(onClose, func(it error) {
+			h.userconns.Delete(conn)
+		})
 		h.logger.InfoContext(ctx, "[", userName, "] inbound connection to ", metadata.Destination)
 	} else {
 		h.logger.InfoContext(ctx, "inbound connection to ", metadata.Destination)
@@ -148,6 +151,9 @@ func (h *Inbound) NewPacketConnectionEx(ctx context.Context, conn N.PacketConn, 
 	if userName := h.userNameList[userID]; userName != "" {
 		metadata.User = userName
 		h.userconns.Store(conn, userName)
+		onClose = N.AppendClose(onClose, func(it error) {
+			h.userconns.Delete(conn)
+		})
 		h.logger.InfoContext(ctx, "[", userName, "] inbound packet connection to ", metadata.Destination)
 	} else {
 		h.logger.InfoContext(ctx, "inbound packet connection to ", metadata.Destination)
