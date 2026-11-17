@@ -262,3 +262,7 @@ func (r *Router) ResetNetwork() {
 		r.processSearcher.ResetCache()
 	}
 }
+
+func (r *Router) GetCtx() context.Context {
+	return r.ctx
+}
