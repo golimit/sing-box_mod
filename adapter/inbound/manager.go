@@ -2,6 +2,8 @@ package inbound
 
 import (
 	"context"
+	"os"
+	"slices"
 	"sync"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -17,6 +19,8 @@ type Manager struct {
 	access       sync.Mutex
 	inbounds     []adapter.Inbound
 	inboundByTag map[string]adapter.Inbound
+	scope        *adapter.Scope
+	running      bool
 }
 
 func NewManager(registry adapter.InboundRegistry, endpoint adapter.EndpointManager) *Manager {
@@ -29,7 +33,11 @@ func NewManager(registry adapter.InboundRegistry, endpoint adapter.EndpointManag
 
 func (m *Manager) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 	m.access.Lock()
-	inbounds := m.inbounds
+	m.scope = scope
+	if stage == adapter.StartStateStarted {
+		m.running = true
+	}
+	inbounds := slices.Clone(m.inbounds)
 	m.access.Unlock()
 	for _, inbound := range inbounds {
 		name := "inbound/" + inbound.Type() + "[" + inbound.Tag() + "]"
@@ -63,12 +71,51 @@ func (m *Manager) Create(ctx context.Context, router adapter.Router, logger log.
 		return err
 	}
 	m.access.Lock()
+	if _, loaded := m.inboundByTag[tag]; loaded {
+		m.access.Unlock()
+		return E.New("duplicate inbound tag: ", tag)
+	}
+	scope := m.scope
+	running := m.running
+	m.access.Unlock()
+	if running {
+		name := "inbound/" + inbound.Type() + "[" + tag + "]"
+		for _, stage := range adapter.ListStartStages {
+			err = scope.Start(name, inbound, stage)
+			if err != nil {
+				_ = scope.CloseComponent(inbound)
+				return err
+			}
+		}
+	}
+	m.access.Lock()
 	defer m.access.Unlock()
-	_, loaded := m.inboundByTag[tag]
-	if loaded {
+	if _, loaded := m.inboundByTag[tag]; loaded {
+		if running {
+			_ = scope.CloseComponent(inbound)
+		}
 		return E.New("duplicate inbound tag: ", tag)
 	}
 	m.inbounds = append(m.inbounds, inbound)
 	m.inboundByTag[tag] = inbound
 	return nil
+}
+
+func (m *Manager) Remove(tag string) error {
+	m.access.Lock()
+	inbound, found := m.inboundByTag[tag]
+	if !found {
+		m.access.Unlock()
+		return os.ErrInvalid
+	}
+	delete(m.inboundByTag, tag)
+	m.inbounds = slices.DeleteFunc(m.inbounds, func(it adapter.Inbound) bool {
+		return it == inbound
+	})
+	scope := m.scope
+	m.access.Unlock()
+	if scope == nil {
+		return nil
+	}
+	return scope.CloseComponent(inbound)
 }
